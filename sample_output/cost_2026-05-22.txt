@@ -1,0 +1,10 @@
+Cost for Environment=dev over last 7 days (2026-05-15 → 2026-05-22):
+------------------------------------------------------------
+------------------------------------------------------------
+  TOTAL                                          $    0.00
+
+Note: No cost data available. This is expected if:
+- No resources with this tag exist
+- Cost data has not yet propagated (8-24h lag)
+- Cost allocation tags are not activated in AWS Billing Console
+
