@@ -79,4 +79,64 @@ def run(args):
         args.apply       — bool, default False (dry-run)
         args.volume_id   — optional str, only migrate this volume when --apply
     """
-    raise NotImplementedError("TODO: implement migrate-gp3 — see module docstring")
+    ec2 = boto3.client("ec2")
+    
+    # Get all gp2 volumes
+    filters = [{"Name": "volume-type", "Values": ["gp2"]}]
+    if args.volume_id:
+        filters.append({"Name": "volume-id", "Values": [args.volume_id]})
+    
+    response = ec2.describe_volumes(Filters=filters)
+    gp2_volumes = response.get("Volumes", [])
+    
+    if not gp2_volumes:
+        print("No gp2 volumes found.")
+        return
+    
+    # Calculate savings
+    price_delta = GP2_PRICE - GP3_PRICE
+    total_savings = 0
+    
+    if not args.apply:
+        # Dry-run mode
+        print(f"gp2 volumes (price delta ${price_delta:.3f}/GB-month):")
+        print("-" * 78)
+        
+        for vol in gp2_volumes:
+            vol_id = vol["VolumeId"]
+            size = vol["Size"]
+            savings = size * price_delta
+            total_savings += savings
+            
+            # Check if attached
+            attachments = vol.get("Attachments", [])
+            if attachments:
+                attached = attachments[0]["InstanceId"]
+            else:
+                attached = "(none)"
+            
+            print(f"  {vol_id:25s} {size:4d}GB  attached={attached:20s} ${savings:.2f}/mo savings")
+        
+        print("-" * 78)
+        print()
+        print(f"Total potential savings: ${total_savings:.2f}/mo")
+        print()
+        print("(dry-run — pass --apply --volume-id <id> to migrate one, or --apply to migrate ALL)")
+    
+    else:
+        # Apply mode
+        for vol in gp2_volumes:
+            vol_id = vol["VolumeId"]
+            
+            ec2.modify_volume(
+                VolumeId=vol_id,
+                VolumeType="gp3",
+                Iops=3000,
+                Throughput=125
+            )
+            
+            print(f"  → modify_volume issued for {vol_id} (gp3, 3000 IOPS, 125 MiB/s)")
+        
+        print()
+        print("Volume(s) entering 'modifying' → 'optimizing' state. App stays online.")
+        print("Use `costctl list volume` after ~30 minutes to confirm 'in-use' + gp3.")

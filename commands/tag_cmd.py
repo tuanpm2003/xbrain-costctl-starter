@@ -49,23 +49,49 @@ from commands._common import parse_kv
 
 def _to_tags(set_args):
     """Convert ['k1=v1', 'k2=v2'] to [{'Key':'k1','Value':'v1'}, ...]."""
-    raise NotImplementedError("TODO: implement _to_tags using parse_kv")
+    return [{"Key": k, "Value": v} for k, v in (parse_kv(s) for s in set_args)]
 
 
 def _tag_ec2(rid, tags):
-    raise NotImplementedError("TODO: implement _tag_ec2 using create_tags")
+    ec2 = boto3.client("ec2")
+    ec2.create_tags(Resources=[rid], Tags=tags)
 
 
 def _tag_rds(rid, tags):
-    raise NotImplementedError("TODO: implement _tag_rds — remember to fetch ARN first")
+    rds = boto3.client("rds")
+    # Fetch ARN first
+    response = rds.describe_db_instances(DBInstanceIdentifier=rid)
+    arn = response["DBInstances"][0]["DBInstanceArn"]
+    rds.add_tags_to_resource(ResourceName=arn, Tags=tags)
 
 
 def _tag_s3(rid, tags):
-    raise NotImplementedError("TODO: implement _tag_s3 — MERGE with existing tags, don't replace")
+    s3 = boto3.client("s3")
+    from botocore.exceptions import ClientError
+    
+    # Get existing tags
+    try:
+        response = s3.get_bucket_tagging(Bucket=rid)
+        existing_tags = response.get("TagSet", [])
+    except ClientError:
+        # No existing tags
+        existing_tags = []
+    
+    # Merge with new tags (new tags override existing ones with same key)
+    existing_dict = {t["Key"]: t["Value"] for t in existing_tags}
+    for tag in tags:
+        existing_dict[tag["Key"]] = tag["Value"]
+    
+    # Convert back to list format
+    merged_tags = [{"Key": k, "Value": v} for k, v in existing_dict.items()]
+    
+    # Apply merged tags
+    s3.put_bucket_tagging(Bucket=rid, Tagging={"TagSet": merged_tags})
 
 
 def _tag_volume(rid, tags):
-    raise NotImplementedError("TODO: implement _tag_volume using create_tags")
+    ec2 = boto3.client("ec2")
+    ec2.create_tags(Resources=[rid], Tags=tags)
 
 
 DISPATCH = {
@@ -84,4 +110,13 @@ def run(args):
         args.id    — resource identifier
         args.set   — list[str], each "key=value"
     """
-    raise NotImplementedError("TODO: implement run() — see module docstring")
+    # Convert --set args to tag format
+    tags = _to_tags(args.set)
+    
+    # Apply tags
+    func = DISPATCH[args.type]
+    func(args.id, tags)
+    
+    # Print confirmation
+    tag_str = ", ".join(f"{t['Key']}={t['Value']}" for t in tags)
+    print(f"Applied {len(tags)} tag(s) to {args.type} {args.id}: {tag_str}")
